@@ -1,0 +1,89 @@
+Metadata-Version: 2.4
+Name: pqc-outsourced-storage-backend
+Version: 0.1.0
+Summary: Secure outsourced storage backend with post-quantum cryptographic support
+Author: PQC Storage Team
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: fastapi<1,>=0.115.0
+Requires-Dist: uvicorn[standard]<1,>=0.30.0
+Requires-Dist: sqlalchemy<3,>=2.0.32
+Requires-Dist: aiosqlite<1,>=0.20.0
+Requires-Dist: asyncpg<1,>=0.30.0
+Requires-Dist: alembic<2,>=1.13.2
+Requires-Dist: pydantic<3,>=2.8.2
+Requires-Dist: pydantic-settings<3,>=2.3.4
+Requires-Dist: python-multipart<1,>=0.0.9
+Requires-Dist: pyjwt<3,>=2.9.0
+Requires-Dist: cryptography<44,>=43.0.0
+Requires-Dist: slowapi<1,>=0.1.9
+Requires-Dist: boto3<2,>=1.35.0
+Requires-Dist: httpx<1,>=0.27.0
+Requires-Dist: liboqs-python>=0.10.0
+Provides-Extra: dev
+Requires-Dist: pytest<9,>=8.3.2; extra == "dev"
+Requires-Dist: pytest-asyncio<1,>=0.24.0; extra == "dev"
+Requires-Dist: pytest-cov<6,>=5.0.0; extra == "dev"
+Requires-Dist: ruff<1,>=0.6.8; extra == "dev"
+
+# PQC Outsourced Storage Backend
+
+FastAPI backend for zero-knowledge outsourced encrypted file storage with post-quantum key/signature metadata verification.
+
+## Threat Model Summary
+
+- Backend is untrusted and does not get plaintext or private keys.
+- Client performs encryption/decryption, signing, KEM decapsulation.
+- Backend stores ciphertext and cryptographic metadata, verifies integrity/authenticity, enforces ownership.
+- Compromise of backend should not expose plaintext; tampering is detected by signed canonical metadata and ciphertext hash checks.
+
+## Features
+
+- PQ challenge-response login and short-lived JWT sessions.
+- Deterministic canonical metadata serialization for signatures.
+- Multipart file upload with streaming storage and hash verification.
+- Pluggable storage backend: local, MinIO, S3.
+- Server-side re-verification endpoint for tamper-at-rest detection.
+- Benchmark engine (KEM/SIG/AES) with API and CLI export.
+
+## Quick Start
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .[dev]
+cp .env.example .env
+python scripts/seed_demo.py
+uvicorn app.main:app --reload
+```
+
+Open `http://localhost:8000/docs`.
+
+## Tests
+
+```bash
+pytest -q
+```
+
+## Benchmark CLI
+
+```bash
+python scripts/run_benchmarks.py --iterations 200 --out results/
+```
+
+## Docker
+
+```bash
+docker compose up --build
+```
+
+The Docker image builds and installs `liboqs` before installing Python dependencies.
+
+## API Prefix
+
+All endpoints are under `/api/v1`.
+
+## Notes
+
+- JWT uses HS256 for session tokens (short-lived, operationally practical). PQ JWT signatures are not implemented.
+- `/files/{id}/share` and `/files/{id}/shares` are currently stubs.

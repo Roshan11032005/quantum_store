@@ -1,0 +1,34 @@
+{
+  "canonical_json_vectors": [
+    {
+      "description": "Simple object with string values",
+      "input": { "b": "world", "a": "hello" },
+      "expected": "{\"a\":\"hello\",\"b\":\"world\"}"
+    },
+    {
+      "description": "Nested object",
+      "input": { "z": 1, "a": { "b": 2, "a": 1 } },
+      "expected": "{\"a\":{\"a\":1,\"b\":2},\"z\":1}"
+    },
+    {
+      "description": "Array preserves order",
+      "input": [3, 1, 2],
+      "expected": "[3,1,2]"
+    },
+    {
+      "description": "Null value",
+      "input": null,
+      "expected": "null"
+    },
+    {
+      "description": "Boolean values",
+      "input": { "t": true, "f": false },
+      "expected": "{\"f\":false,\"t\":true}"
+    },
+    {
+      "description": "Unicode string",
+      "input": { "key": "héllo" },
+      "expected": "{\"key\":\"héllo\"}"
+    }
+  ]
+}
