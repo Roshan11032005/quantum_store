@@ -44,6 +44,43 @@ def create_app() -> FastAPI:
     async def startup() -> None:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        # Pre-warm the oqs import so the shared library is loaded once
+        # during server startup, not silently on the first user request.
+        import logging
+        _log = logging.getLogger("app.startup")
+        try:
+            from app.core.pqc import _load_oqs
+            oqs = _load_oqs()
+            if oqs is not None:
+                _log.info("liboqs ready — version %s", oqs.oqs_version())
+            else:
+                _log.warning("liboqs-python not available; PQC features will be disabled")
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("liboqs pre-warm failed: %s", exc)
+
+        # Ensure the MinIO/S3 bucket exists before any request arrives.
+        if settings.storage_backend in ("minio", "s3"):
+            import boto3
+            import botocore.exceptions
+            endpoint = f"http://{settings.minio_endpoint}" if settings.storage_backend == "minio" else None
+            s3 = boto3.client(
+                "s3",
+                region_name=settings.s3_region or None,
+                endpoint_url=endpoint,
+                aws_access_key_id=settings.minio_access_key if endpoint else None,
+                aws_secret_access_key=settings.minio_secret_key if endpoint else None,
+            )
+            bucket = settings.minio_bucket if settings.storage_backend == "minio" else settings.s3_bucket
+            try:
+                s3.head_bucket(Bucket=bucket)
+                _log.info("Bucket '%s' already exists", bucket)
+            except botocore.exceptions.ClientError as e:
+                code = e.response["Error"]["Code"]
+                if code in ("404", "NoSuchBucket"):
+                    s3.create_bucket(Bucket=bucket)
+                    _log.info("Created bucket '%s'", bucket)
+                else:
+                    _log.warning("Could not verify bucket '%s': %s", bucket, e)
 
     app.include_router(auth_router, prefix="/api/v1")
     app.include_router(users_router, prefix="/api/v1")

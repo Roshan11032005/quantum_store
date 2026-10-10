@@ -110,8 +110,17 @@ const api = {
     const providers = allKemProviders.filter(p => algorithmNames.includes(p.name));
     const results: BenchmarkResult[] = [];
     for (const provider of providers) {
-      const r = await benchmarkKem(provider, iterations);
-      results.push(...r);
+      try {
+        const r = await benchmarkKem(provider, iterations);
+        results.push(...r);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.startsWith('ALG_UNSUPPORTED')) {
+          console.warn(`[bench] Skipping ${provider.name}: ${msg}`);
+        } else {
+          throw e;
+        }
+      }
     }
     return results;
   },
@@ -120,8 +129,17 @@ const api = {
     const providers = allSigProviders.filter(p => algorithmNames.includes(p.name));
     const results: BenchmarkResult[] = [];
     for (const provider of providers) {
-      const r = await benchmarkSig(provider, iterations, messageSizes);
-      results.push(...r);
+      try {
+        const r = await benchmarkSig(provider, iterations, messageSizes);
+        results.push(...r);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.startsWith('ALG_UNSUPPORTED')) {
+          console.warn(`[bench] Skipping ${provider.name}: ${msg}`);
+        } else {
+          throw e;
+        }
+      }
     }
     return results;
   },

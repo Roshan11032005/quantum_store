@@ -76,7 +76,11 @@ export function zeroize(buf: Uint8Array): void {
 /** Generate n cryptographically random bytes */
 export function randomBytes(n: number): Uint8Array<ArrayBuffer> {
   const buf = new Uint8Array(n) as Uint8Array<ArrayBuffer>;
-  crypto.getRandomValues(buf);
+  // crypto.getRandomValues is limited to 65536 bytes per call
+  const MAX = 65536;
+  for (let offset = 0; offset < n; offset += MAX) {
+    crypto.getRandomValues(buf.subarray(offset, offset + MAX));
+  }
   return buf;
 }
 

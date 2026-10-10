@@ -37,7 +37,8 @@ export class ApiError extends Error {
 }
 
 function buildUrl(path: string, params?: Record<string, string | number | boolean | undefined>): string {
-  const url = new URL(path.startsWith('http') ? path : `${API_BASE}${path}`);
+  const resolvedBase = API_BASE.startsWith('/') ? `${window.location.origin}${API_BASE}` : API_BASE;
+  const url = new URL(path.startsWith('http') ? path : `${resolvedBase}${path}`);
   if (params) {
     for (const [key, value] of Object.entries(params)) {
       if (value !== undefined) {

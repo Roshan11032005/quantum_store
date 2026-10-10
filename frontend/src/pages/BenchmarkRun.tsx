@@ -9,12 +9,95 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   LineChart, Line, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
 } from 'recharts';
-import { runBenchmark, getBenchmarkRun, type BenchmarkResult } from '../api/benchmarks';
+import * as Comlink from 'comlink';
+import { runBenchmark, getBenchmarkRun, type BenchmarkResult, type BenchmarkRun } from '../api/benchmarks';
 import { useToast } from '../components/common/Toast';
 import { formatMs } from '../utils/format';
 
+// ── Browser benchmark runner ──────────────────────────────────────────────
+type BenchWorkerApi = {
+  runKemBenchmark(algorithmNames: string[], iterations: number): Promise<BenchmarkResult[]>;
+  runSigBenchmark(algorithmNames: string[], iterations: number, messageSizes: number[]): Promise<BenchmarkResult[]>;
+};
+
+async function runBrowserBenchmarks(
+  kemAlgs: string[],
+  sigAlgs: string[],
+  iterations: number,
+  messageSizes: number[],
+): Promise<BenchmarkResult[]> {
+  const worker = new Worker(
+    new URL('../crypto/workers/bench.worker.ts', import.meta.url),
+    { type: 'module' },
+  );
+  const api = Comlink.wrap<BenchWorkerApi>(worker);
+  try {
+    const [kemResults, sigResults] = await Promise.all([
+      kemAlgs.length > 0 ? api.runKemBenchmark(kemAlgs, iterations) : Promise.resolve([]),
+      sigAlgs.length > 0 ? api.runSigBenchmark(sigAlgs, iterations, messageSizes) : Promise.resolve([]),
+    ]);
+    return [...kemResults, ...sigResults];
+  } finally {
+    worker.terminate();
+  }
+}
+
+async function doRunBenchmark(
+  request: Parameters<typeof runBenchmark>[0],
+  setPhase: (p: string) => void,
+): Promise<BenchmarkRun> {
+  const { environment, kem_algorithms, sig_algorithms, iterations, message_sizes = [32, 1024, 1048576] } = request;
+  const runBrowser = environment === 'browser' || environment === 'both';
+  const runServer  = environment === 'server'  || environment === 'both';
+
+  let browserResults: BenchmarkResult[] = [];
+  let serverRun: BenchmarkRun | null = null;
+
+  if (runBrowser) {
+    setPhase('Running browser benchmarks…');
+    // In the real protocol the browser always signs a SHA-256 digest (32 B).
+    // Larger message sizes are unrealistic and take minutes in a JS environment.
+    const browserMsgSizes = [32];
+    browserResults = await runBrowserBenchmarks(kem_algorithms, sig_algorithms, iterations, browserMsgSizes);
+  }
+
+  if (runServer) {
+    setPhase('Running server benchmarks…');
+    serverRun = await runBenchmark({ ...request, environment: 'server' });
+  }
+
+  if (serverRun && runBrowser) {
+    // Merge: tag browser results so the table can show environment column
+    return {
+      ...serverRun,
+      environment: 'both',
+      results: [
+        ...browserResults.map((r) => ({ ...r, _env: 'browser' } as BenchmarkResult)),
+        ...serverRun.results.map((r) => ({ ...r, _env: 'server' } as BenchmarkResult)),
+      ],
+    };
+  }
+
+  if (serverRun) return serverRun;
+
+  // browser-only
+  return {
+    run_id: crypto.randomUUID(),
+    environment: 'browser',
+    results: browserResults,
+    created_at: new Date().toISOString(),
+    library_versions: { '@noble/post-quantum': 'latest' },
+    system_info: {
+      location: 'browser',
+      userAgent: navigator.userAgent.slice(0, 120),
+    },
+  };
+}
+
 const KEM_ALGS = ['ML-KEM-512', 'ML-KEM-768', 'ML-KEM-1024'];
+// Falcon requires liboqs-wasm which is not bundled — noble-based algorithms only for browser benchmarks.
 const SIG_ALGS = ['ML-DSA-44', 'ML-DSA-65', 'ML-DSA-87', 'SLH-DSA-SHA2-128f', 'Falcon-512'];
+const SIG_ALGS_BROWSER = ['ML-DSA-44', 'ML-DSA-65', 'ML-DSA-87', 'SLH-DSA-SHA2-128f'];
 const MSG_SIZES = [32, 1024, 1048576];
 const FILE_SIZES = [1, 10, 100]; // MB
 
@@ -27,11 +110,13 @@ export default function BenchmarkRun() {
   const existingRunId = searchParams.get('runId');
   const { error: showError } = useToast();
   const chartRef = useRef<HTMLDivElement>(null);
+  const [runPhase, setRunPhase] = useState<string>('Running…');
 
   const [env, setEnv] = useState<Env>('browser');
   const [selectedKems, setSelectedKems] = useState<string[]>(['ML-KEM-512', 'ML-KEM-768', 'ML-KEM-1024']);
   const [selectedSigs, setSelectedSigs] = useState<string[]>(['ML-DSA-44', 'ML-DSA-65', 'ML-DSA-87', 'SLH-DSA-SHA2-128f']);
-  const [iterations, setIterations] = useState(100);
+  // Browser JS crypto is slower than native — keep default low to avoid long waits.
+  const [iterations, setIterations] = useState(20);
 
   const { data: existingRun } = useQuery({
     queryKey: ['benchmark', existingRunId],
@@ -40,7 +125,7 @@ export default function BenchmarkRun() {
   });
 
   const runMut = useMutation({
-    mutationFn: runBenchmark,
+    mutationFn: (req: Parameters<typeof runBenchmark>[0]) => doRunBenchmark(req, setRunPhase),
     onError: (err) => showError('Benchmark failed', err instanceof Error ? err.message : undefined),
   });
 
@@ -51,6 +136,7 @@ export default function BenchmarkRun() {
   }
 
   async function handleRun() {
+    setRunPhase('Starting…');
     await runMut.mutateAsync({
       environment: env,
       kem_algorithms: selectedKems,
@@ -165,7 +251,7 @@ export default function BenchmarkRun() {
         <div>
           <label className="block text-sm font-medium mb-2">Signature Algorithms</label>
           <div className="flex flex-wrap gap-2">
-            {SIG_ALGS.map((alg) => (
+            {(env === 'server' ? SIG_ALGS : SIG_ALGS_BROWSER).map((alg) => (
               <button
                 key={alg}
                 onClick={() => toggleAlg(selectedSigs, setSelectedSigs, alg)}
@@ -174,6 +260,11 @@ export default function BenchmarkRun() {
                 {alg}
               </button>
             ))}
+            {env !== 'server' && (
+              <span className="px-3 py-1 text-xs rounded-full border border-dashed border-border text-muted-foreground/50 cursor-not-allowed" title="Falcon requires liboqs-wasm which is not available in this build">
+                Falcon-512 (unavailable in browser)
+              </span>
+            )}
           </div>
         </div>
 
@@ -190,7 +281,9 @@ export default function BenchmarkRun() {
             onChange={(e) => setIterations(Number(e.target.value))}
             className="w-full max-w-xs accent-primary"
           />
-          <p className="text-xs text-muted-foreground mt-1">Message sizes: 32 B (hash), 1 KB, 1 MB</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            {env === 'server' ? 'Message sizes: 32 B, 1 KB, 1 MB' : 'Browser: 32 B only (matches real protocol — sign is always over a SHA-256 hash). Server: 32 B, 1 KB, 1 MB.'}
+          </p>
         </div>
 
         <button
@@ -204,7 +297,7 @@ export default function BenchmarkRun() {
         {runMut.isPending && (
           <div className="flex items-center gap-3">
             <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" />
-            <p className="text-sm text-muted-foreground">Benchmarking, please wait…</p>
+            <p className="text-sm text-muted-foreground">{runPhase}</p>
           </div>
         )}
       </div>

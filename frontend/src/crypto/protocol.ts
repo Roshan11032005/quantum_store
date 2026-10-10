@@ -271,7 +271,11 @@ export async function downloadPipeline(
   onProgress({ stage: 'verifying_signature', progress: 0 });
   t = nowMs();
 
-  const metadataBytes = canonicalJsonBytes(metadata as unknown as Record<string, unknown>);
+  // Strip fields that were NOT present in the metadata at signing time.
+  // kem_ciphertext and wrapped_dek are merged in from the API response for
+  // client-side DEK unwrapping but were never included in the signed canonical JSON.
+  const { kem_ciphertext: _kc, wrapped_dek: _wd, ...metadataForVerification } = metadata;
+  const metadataBytes = canonicalJsonBytes(metadataForVerification as unknown as Record<string, unknown>);
   const metadataHash = await sha256(metadataBytes);
   const sigValid = await sigProvider.verify(sigPublicKey, metadataHash, serverSignature);
 
