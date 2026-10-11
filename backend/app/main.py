@@ -58,8 +58,12 @@ def create_app() -> FastAPI:
         except Exception as exc:  # noqa: BLE001
             _log.warning("liboqs pre-warm failed: %s", exc)
 
-        # Ensure the MinIO/S3 bucket exists before any request arrives.
-        if settings.storage_backend in ("minio", "s3"):
+        # Ensure storage is ready before any request arrives.
+        if settings.storage_backend == "local":
+            import pathlib
+            pathlib.Path(settings.storage_root).mkdir(parents=True, exist_ok=True)
+            _log.info("Local storage root ready: %s", settings.storage_root)
+        elif settings.storage_backend in ("minio", "s3"):
             import boto3
             import botocore.exceptions
             endpoint = f"http://{settings.minio_endpoint}" if settings.storage_backend == "minio" else None
