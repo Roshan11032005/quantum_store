@@ -130,6 +130,12 @@ async def get_file_content(
         async for chunk in storage.get(row.storage_key, start=start, end=end):
             yield chunk
 
+    # Check the object exists before starting the streaming response.
+    # A missing object after the DB record exists means the storage backend
+    # changed (e.g. MinIO → local) or the file was deleted externally.
+    if not await storage.exists(row.storage_key):
+        raise HTTPException(status_code=404, detail="File content not found. The file may need to be re-uploaded.")
+
     return StreamingResponse(
         body(),
         media_type="application/octet-stream",

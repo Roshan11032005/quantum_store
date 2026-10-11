@@ -39,6 +39,9 @@ class LocalStorageBackend(StorageBackend):
     async def get(self, key: str, start: int | None = None, end: int | None = None) -> AsyncIterator[bytes]:
         path = self._path(key)
 
+        if not path.exists():
+            raise FileNotFoundError(f"Storage object not found: {key}")
+
         def read_chunks() -> list[bytes]:
             chunks: list[bytes] = []
             with path.open("rb") as fh:

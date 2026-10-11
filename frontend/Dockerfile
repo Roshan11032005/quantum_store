@@ -3,9 +3,12 @@ FROM node:20-alpine AS build
 
 WORKDIR /app
 
+# Install deps first (cached layer — only busts when package*.json changes)
 COPY package*.json ./
 RUN npm ci
 
+# Copy source — node_modules is excluded via .dockerignore so the
+# clean install above is never overwritten by host node_modules.
 COPY . .
 
 # When built via the root docker-compose.yml the gateway serves both
